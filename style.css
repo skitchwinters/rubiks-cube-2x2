@@ -885,6 +885,11 @@ h1 {
   line-height: 0;
 }
 
+.net-dot u {
+  text-decoration: underline;
+  text-underline-offset: 1px;
+}
+
 @media (max-width: 768px) {
   .top-bar {
     flex-direction: column;

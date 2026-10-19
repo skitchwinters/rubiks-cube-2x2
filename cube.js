@@ -590,11 +590,69 @@ function formatDotTextHtml(text) {
     if (text.includes('\n')) {
         return text.split('\n').map(part => formatDotTextHtml(part)).join('<br>');
     }
-    const match = text.match(/^([A-Za-z0-9]+)[_\{]+([A-Za-z0-9]+)[\}]?$/);
+    const match = text.match(/^([A-Za-z0-9<>/\\]+)[_\{]+([A-Za-z0-9]+)[\}]?$/);
     if (match) {
         return `${match[1]}<sub>${match[2]}</sub>`;
     }
+    const underMatch = text.match(/^([0-9]+)_$/);
+    if (underMatch) {
+        return `<u>${underMatch[1]}</u>`;
+    }
     return text;
+}
+
+function parseUnderlineSegments(str) {
+    if (!str) return [{ text: '', underline: false }];
+    const segments = [];
+    const regex = /<u>(.*?)<\/u>/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(str)) !== null) {
+        if (match.index > lastIndex) {
+            segments.push({ text: str.substring(lastIndex, match.index), underline: false });
+        }
+        segments.push({ text: match[1], underline: true });
+        lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < str.length) {
+        segments.push({ text: str.substring(lastIndex), underline: false });
+    }
+    return segments.length > 0 ? segments : [{ text: str, underline: false }];
+}
+
+function drawTextWithUnderline(ctx, textStr, centerX, centerY, font, fontSize, color = '#000000') {
+    const segments = parseUnderlineSegments(textStr);
+    ctx.font = font;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    
+    // Measure total width
+    let totalWidth = 0;
+    for (const seg of segments) {
+        seg.width = ctx.measureText(seg.text).width;
+        totalWidth += seg.width;
+    }
+    
+    let curX = centerX - totalWidth / 2;
+    const underlineY = centerY + fontSize * 0.44;
+    const lineWidth = Math.max(3, Math.round(fontSize * 0.085));
+    
+    ctx.textAlign = 'left';
+    for (const seg of segments) {
+        ctx.fillText(seg.text, curX, centerY);
+        if (seg.underline) {
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(curX, underlineY);
+            ctx.lineTo(curX + seg.width, underlineY);
+            ctx.stroke();
+            ctx.restore();
+        }
+        curX += seg.width;
+    }
 }
 
 function createDotTexture(text, color) {
@@ -658,14 +716,13 @@ function createDotTexture(text, color) {
                 ctx.fillText(line1, 128, 82);
             }
 
-            // Line 2: GAP54 index
-            ctx.fillStyle = '#000000';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = line2.length === 1 ? 'bold 76px sans-serif' : 'bold 68px sans-serif';
-            ctx.fillText(line2, 128, 180);
+            // Line 2: GAP24 index (with underline support)
+            const cleanLine2 = line2.replace(/<\/?u>/g, '');
+            const fontSize = cleanLine2.length === 1 ? 76 : 68;
+            const font = 'bold ' + fontSize + 'px sans-serif';
+            drawTextWithUnderline(ctx, line2, 128, 180, font, fontSize);
         } else {
-            const subMatch = text.match(/^([A-Za-z0-9]+)[_\{]+([A-Za-z0-9]+)[\}]?$/);
+            const subMatch = text.match(/^([A-Za-z0-9<>/\\]+)[_\{]+([A-Za-z0-9]+)[\}]?$/);
             if (subMatch) {
                 const base = subMatch[1];
                 const sub = subMatch[2];
@@ -677,33 +734,27 @@ function createDotTexture(text, color) {
                 const subFont = 'bold 62px sans-serif';
                 
                 ctx.font = baseFont;
-                const baseW = ctx.measureText(base).width;
+                const baseW = ctx.measureText(base.replace(/<\/?u>/g, '')).width;
                 ctx.font = subFont;
-                const subW = ctx.measureText(sub).width;
+                const subW = ctx.measureText(sub.replace(/<\/?u>/g, '')).width;
                 
                 const totalW = baseW + subW + 4;
                 const startX = 128 - totalW / 2;
                 
-                ctx.font = baseFont;
-                ctx.fillText(base, startX, 118);
-                
-                ctx.font = subFont;
-                ctx.fillText(sub, startX + baseW + 4, 154);
+                drawTextWithUnderline(ctx, base, startX + baseW / 2, 118, baseFont, 96);
+                drawTextWithUnderline(ctx, sub, startX + baseW + 4 + subW / 2, 154, subFont, 62);
             } else {
-                ctx.fillStyle = '#000000';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                
-                if (text.length === 1) {
-                    ctx.font = 'bold 125px sans-serif';
-                } else if (text.length === 2) {
-                    ctx.font = 'bold 100px sans-serif';
-                } else if (text.length === 3) {
-                    ctx.font = 'bold 80px sans-serif';
-                } else {
-                    ctx.font = 'bold 65px sans-serif';
+                const cleanText = text.replace(/<\/?u>/g, '');
+                let fontSize = 65;
+                if (cleanText.length === 1) {
+                    fontSize = 125;
+                } else if (cleanText.length === 2) {
+                    fontSize = 100;
+                } else if (cleanText.length === 3) {
+                    fontSize = 80;
                 }
-                ctx.fillText(text, 128, 128);
+                const font = 'bold ' + fontSize + 'px sans-serif';
+                drawTextWithUnderline(ctx, text, 128, 128, font, fontSize);
             }
         }
     }
@@ -1289,7 +1340,7 @@ function applyFullCubeNaming(scheme) {
             ['3', '4']
         ],
         L: [
-            ['5', '6'],
+            ['5', '<u>6</u>'],
             ['7', '8']
         ],
         F: [
@@ -1298,7 +1349,7 @@ function applyFullCubeNaming(scheme) {
         ],
         R: [
             ['13', '14'],
-            ['15', '16']
+            ['15', '<u>16</u>']
         ],
         B: [
             ['17', '18'],
