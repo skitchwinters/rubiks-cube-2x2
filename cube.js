@@ -77,6 +77,10 @@ let dotMode = false;
 let dotColorIndex = 0;
 const dotColors = ['#00FFFF', '#FF00FF', '#00FF00', '#FFA500', '#800080', '#FFFF00', '#FFC0CB', '#0000FF'];
 
+// --- Perimeter Mirror Facets State (Declared early to eliminate TDZ ReferenceErrors) ---
+let perimeterFacets = [];
+let perimeterFacetsEnabled = true;
+
 // Materials Factory
 function getMaterials(theme) {
     const mats = [];
@@ -1426,8 +1430,6 @@ if (btnNamingBoth) {
 
 
 // --- Perimeter Mirror Facets (Ruwix / Solver Style) ---
-let perimeterFacets = [];
-let perimeterFacetsEnabled = true;
 
 function createFacetTexture(bgColor, dotText, dotColor) {
     const canvas = document.createElement('canvas');
