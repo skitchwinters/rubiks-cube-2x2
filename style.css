@@ -278,29 +278,29 @@ body {
   background: rgba(255, 0, 85, 0.45);
 }
 
-.btn-facets {
+.btn-floating {
   color: #ffb703;
 }
 
-.btn-facets.active {
+.btn-floating.active {
   background: rgba(255, 183, 3, 0.22);
   border-color: #ffb703;
   box-shadow: 0 0 10px rgba(255, 183, 3, 0.45);
 }
 
-[data-theme="cyberpunk"] .btn-facets {
+[data-theme="cyberpunk"] .btn-floating {
   color: #ffb703;
   border-color: #ffb703;
 }
-[data-theme="cyberpunk"] .btn-facets.active {
+[data-theme="cyberpunk"] .btn-floating.active {
   background: rgba(255, 183, 3, 0.35);
 }
 
-[data-theme="carbon"] .btn-facets {
+[data-theme="carbon"] .btn-floating {
   color: #ffb703;
   border-color: #ffb703;
 }
-[data-theme="carbon"] .btn-facets.active {
+[data-theme="carbon"] .btn-floating.active {
   background: rgba(255, 183, 3, 0.35);
 }
 

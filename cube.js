@@ -77,9 +77,65 @@ let dotMode = false;
 let dotColorIndex = 0;
 const dotColors = ['#00FFFF', '#FF00FF', '#00FF00', '#FFA500', '#800080', '#FFFF00', '#FFC0CB', '#0000FF'];
 
-// --- Perimeter Mirror Facets State (Declared early to eliminate TDZ ReferenceErrors) ---
-let perimeterFacets = [];
-let perimeterFacetsEnabled = true;
+// --- Floating Hidden Sides State (Declared early to eliminate TDZ ReferenceErrors) ---
+const floatingSidesGroup = new THREE.Group();
+scene.add(floatingSidesGroup);
+let floatingSidesEnabled = true;
+let floatingMirrors = {};
+
+const MIRROR_DIST = 2.45;
+const MIRROR_SIZE = 2.05;
+
+const mirrorConfigs = {
+    D: { // Down face (Yellow) - lies in XZ plane, normal +Y (facing up towards camera)
+        pos: new THREE.Vector3(0, -MIRROR_DIST, 0),
+        rot: new THREE.Euler(-Math.PI / 2, 0, 0),
+        quadrants: [
+            [ [1, 0], [1, 1] ],
+            [ [0, 0], [0, 1] ]
+        ]
+    },
+    U: { // Up face (White) - lies in XZ plane, normal -Y (facing down towards camera)
+        pos: new THREE.Vector3(0, MIRROR_DIST, 0),
+        rot: new THREE.Euler(Math.PI / 2, 0, 0),
+        quadrants: [
+            [ [0, 0], [0, 1] ],
+            [ [1, 0], [1, 1] ]
+        ]
+    },
+    L: { // Left face (Orange) - lies in YZ plane, normal +X (facing right towards camera)
+        pos: new THREE.Vector3(-MIRROR_DIST, 0, 0),
+        rot: new THREE.Euler(0, Math.PI / 2, 0),
+        quadrants: [
+            [ [0, 1], [0, 0] ],
+            [ [1, 1], [1, 0] ]
+        ]
+    },
+    R: { // Right face (Red) - lies in YZ plane, normal -X (facing left towards camera)
+        pos: new THREE.Vector3(MIRROR_DIST, 0, 0),
+        rot: new THREE.Euler(0, -Math.PI / 2, 0),
+        quadrants: [
+            [ [0, 0], [0, 1] ],
+            [ [1, 0], [1, 1] ]
+        ]
+    },
+    B: { // Back face (Blue) - lies in XY plane, normal +Z (facing forward towards camera)
+        pos: new THREE.Vector3(0, 0, -MIRROR_DIST),
+        rot: new THREE.Euler(0, 0, 0),
+        quadrants: [
+            [ [0, 1], [0, 0] ],
+            [ [1, 1], [1, 0] ]
+        ]
+    },
+    F: { // Front face (Green) - lies in XY plane, normal -Z (facing backward towards camera)
+        pos: new THREE.Vector3(0, 0, MIRROR_DIST),
+        rot: new THREE.Euler(0, Math.PI, 0),
+        quadrants: [
+            [ [0, 0], [0, 1] ],
+            [ [1, 0], [1, 1] ]
+        ]
+    }
+};
 
 // Materials Factory
 function getMaterials(theme) {
@@ -137,7 +193,7 @@ function createCube() {
         }
     }
     if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
 }
 createCube();
 
@@ -216,6 +272,32 @@ function onInputDown(event) {
         const clientY = event.touches ? event.touches[0].clientY : event.clientY;
         startMousePos.set(clientX, clientY);
         dragAxis = null;
+    } else if (dotMode && floatingSidesEnabled && typeof mirrorConfigs !== 'undefined') {
+        // Check if user clicked a floating mirror sticker directly
+        const mirrorMeshes = Object.values(floatingMirrors).map(m => m.mesh);
+        const mirrorHits = raycaster.intersectObjects(mirrorMeshes);
+        if (mirrorHits.length > 0) {
+            const hit = mirrorHits[0];
+            const faceKey = hit.object.userData.faceKey;
+            const uv = hit.uv;
+            if (faceKey && uv) {
+                const qr = uv.y < 0.5 ? 1 : 0;
+                const qc = uv.x < 0.5 ? 0 : 1;
+                const cfg = mirrorConfigs[faceKey];
+                if (cfg && typeof getCube2DState === 'function') {
+                    const [sr, sc] = cfg.quadrants[qr][qc];
+                    const state = getCube2DState();
+                    const sticker = state[faceKey] && state[faceKey][sr] ? state[faceKey][sr][sc] : null;
+                    if (sticker && sticker.cubie && sticker.localNormal) {
+                        controls.enabled = false;
+                        if (!event.touches) event.preventDefault();
+                        addDotToFace(sticker.cubie, sticker.localNormal);
+                        return;
+                    }
+                }
+            }
+        }
+        controls.enabled = true;
     } else {
         controls.enabled = true; // Clicked outside: OrbitControls rotates camera
     }
@@ -331,7 +413,7 @@ function snapAndUngroup() {
             playTurnSound();
             animationInProgress = false;
             if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
             
             if (snapRot !== 0) {
                 recordMove();
@@ -385,7 +467,7 @@ function performProgrammaticMove(axis, coord, direction, duration=200) {
                 playTurnSound();
                 animationInProgress = false;
                 if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
                 resolve();
             }
         }
@@ -452,7 +534,7 @@ function resetCube() {
     resetCamera(350);
     playTurnSound();
     if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
 }
 
 async function scrambleCube() {
@@ -809,14 +891,14 @@ function addDotToFace(cubie, localNormal, customText, customColor) {
     
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
 }
 
 function updateDotTexture(dotObj) {
     dotObj.mesh.material.map = createDotTexture(dotObj.mesh.userData.text, dotObj.mesh.userData.color);
     dotObj.mesh.material.map.needsUpdate = true;
     if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
 }
 
 function removeDot(id) {
@@ -827,7 +909,7 @@ function removeDot(id) {
         dots.splice(idx, 1);
         renderDotList();
         if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
     }
 }
 
@@ -837,7 +919,7 @@ function clearAllDots() {
     dotColorIndex = 0;
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
 }
 
 function renderDotList() {
@@ -1021,7 +1103,7 @@ window.loadDotConfig = function(name) {
     
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
 }
 
 window.deleteConfig = function(name) {
@@ -1403,7 +1485,7 @@ function applyFullCubeNaming(scheme) {
 
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
-    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
+    if (typeof updateFloatingSides === 'function') updateFloatingSides();
 }
 
 const btnNamingGap = document.getElementById('btn-naming-gap');
@@ -1429,220 +1511,199 @@ if (btnNamingBoth) {
 }
 
 
-// --- Perimeter Mirror Facets (Ruwix / Solver Style) ---
+// --- Floating Hidden Sides (Ruwix "Floating hidden sides" Style) ---
+function roundRect(ctx, x, y, w, h, r) {
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, r);
+    } else {
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+    }
+}
 
-function createFacetTexture(bgColor, dotText, dotColor) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d');
+function initFloatingSides() {
+    if (Object.keys(floatingMirrors).length === 6) {
+        updateFloatingSides();
+        return;
+    }
 
-    // 1. Background color of the reflected face
-    ctx.fillStyle = bgColor || '#222222';
-    ctx.fillRect(0, 0, 128, 64);
+    const geometry = new THREE.PlaneGeometry(MIRROR_SIZE, MIRROR_SIZE);
 
-    // 2. Beveled Mirror Border (chrome / glass edge look)
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(0, 0, 128, 64);
+    for (const [faceKey, cfg] of Object.entries(mirrorConfigs)) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.MeshBasicMaterial({
+            map: texture,
+            side: THREE.FrontSide, // Crucial: automatically culls mirrors facing away from camera!
+            transparent: true
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(cfg.pos);
+        mesh.rotation.copy(cfg.rot);
+        mesh.userData = { faceKey: faceKey };
+        
+        floatingSidesGroup.add(mesh);
+        floatingMirrors[faceKey] = {
+            mesh: mesh,
+            canvas: canvas,
+            ctx: canvas.getContext('2d'),
+            texture: texture,
+            config: cfg
+        };
+    }
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(4, 4, 120, 56);
+    updateFloatingSides();
+}
 
-    // 3. Subtle diagonal glass reflection highlight
-    const grad = ctx.createLinearGradient(0, 0, 128, 64);
-    grad.addColorStop(0, 'rgba(255, 255, 255, 0.28)');
-    grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.0)');
-    grad.addColorStop(1, 'rgba(0, 0, 0, 0.18)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 128, 64);
+function updateFloatingSides() {
+    if (!floatingSidesEnabled) {
+        floatingSidesGroup.visible = false;
+        return;
+    }
+    floatingSidesGroup.visible = true;
 
-    // 4. If dotText exists, render badge
-    if (dotText) {
-        ctx.fillStyle = dotColor || '#ffffff';
+    if (Object.keys(floatingMirrors).length < 6) {
+        initFloatingSides();
+        return;
+    }
+
+    if (typeof getCube2DState !== 'function') return;
+    const state = getCube2DState();
+
+    const stickerSize = 236;
+    const margin = 16;
+    const gap = 8;
+    const positions = [
+        [margin, margin],                                     // (0,0) Top-Left
+        [margin + stickerSize + gap, margin],                 // (0,1) Top-Right
+        [margin, margin + stickerSize + gap],                 // (1,0) Bottom-Left
+        [margin + stickerSize + gap, margin + stickerSize + gap] // (1,1) Bottom-Right
+    ];
+
+    for (const [faceKey, mirror] of Object.entries(floatingMirrors)) {
+        const ctx = mirror.ctx;
+        ctx.clearRect(0, 0, 512, 512);
+
+        // 1. Dark background panel / bevel frame
+        ctx.fillStyle = '#0e0e14';
         ctx.beginPath();
-        ctx.arc(64, 32, 22, 0, Math.PI * 2);
+        roundRect(ctx, 4, 4, 504, 504, 20);
         ctx.fill();
+
         ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 6;
         ctx.stroke();
 
-        if (dotText.includes('\n')) {
-            const lines = dotText.split('\n');
-            const l1 = lines[0];
-            const l2 = lines[1];
-            ctx.fillStyle = '#000000';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = 'bold 12px sans-serif';
-            ctx.fillText(l1.replace(/<\/?u>/g, ''), 64, 23);
-            drawTextWithUnderline(ctx, l2, 64, 41, 'bold 13px sans-serif', 13);
-        } else {
-            const clean = dotText.replace(/<\/?u>/g, '');
-            const fontSize = clean.length === 1 ? 26 : (clean.length === 2 ? 21 : 16);
-            drawTextWithUnderline(ctx, dotText, 64, 32, 'bold ' + fontSize + 'px sans-serif', fontSize);
-        }
-    }
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
 
-    const texture = new THREE.CanvasTexture(canvas);
-    return texture;
-}
+        const faceData = state[faceKey];
+        if (!faceData) continue;
 
-function getMatIndex(norm) {
-    if (norm.x > 0.5) return 0;
-    if (norm.x < -0.5) return 1;
-    if (norm.y > 0.5) return 2;
-    if (norm.y < -0.5) return 3;
-    if (norm.z > 0.5) return 4;
-    return 5;
-}
+        const quadMap = mirror.config.quadrants;
 
-function createPerimeterFacets() {
-    if (perimeterFacets.length > 0 && cubies.length === 8 && perimeterFacets[0].mesh.parent === cubies[0]) {
-        updatePerimeterFacets();
-        return;
-    }
+        // Draw 4 stickers
+        for (let qr = 0; qr < 2; qr++) {
+            for (let qc = 0; qc < 2; qc++) {
+                const [sr, sc] = quadMap[qr][qc];
+                const sticker = faceData[sr] ? faceData[sr][sc] : null;
+                const posIdx = qr * 2 + qc;
+                const [sx, sy] = positions[posIdx];
 
-    // Clear old facets if any
-    perimeterFacets.forEach(f => {
-        if (f.mesh.parent) f.mesh.parent.remove(f.mesh);
-        if (f.mesh.material.map) f.mesh.material.map.dispose();
-        f.mesh.material.dispose();
-    });
-    perimeterFacets = [];
+                const color = sticker ? sticker.color : (colors[faceKey] ? '#' + colors[faceKey].toString(16).padStart(6, '0') : '#222222');
 
-    const tabLength = 0.44;
-    const tabWidth = 0.22;
-    const theta = Math.PI / 6; // 30 deg tilt outward
+                // Sticker rectangle
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                roundRect(ctx, sx, sy, stickerSize, stickerSize, 14);
+                ctx.fill();
 
-    cubies.forEach(cubie => {
-        const initPos = cubie.userData.initialPosition;
-        const sx = Math.sign(initPos.x);
-        const sy = Math.sign(initPos.y);
-        const sz = Math.sign(initPos.z);
+                // Sticker border
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 6;
+                ctx.stroke();
 
-        const extNormals = [
-            new THREE.Vector3(sx, 0, 0),
-            new THREE.Vector3(0, sy, 0),
-            new THREE.Vector3(0, 0, sz)
-        ];
+                // Subtle gloss overlay
+                const gloss = ctx.createLinearGradient(sx, sy, sx + stickerSize, sy + stickerSize);
+                gloss.addColorStop(0, 'rgba(255, 255, 255, 0.24)');
+                gloss.addColorStop(0.5, 'rgba(255, 255, 255, 0.0)');
+                gloss.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+                ctx.fillStyle = gloss;
+                ctx.beginPath();
+                roundRect(ctx, sx, sy, stickerSize, stickerSize, 14);
+                ctx.fill();
 
-        for (let i = 0; i < 3; i++) {
-            const n_face = extNormals[i];
-            for (let j = 0; j < 3; j++) {
-                if (i === j) continue;
-                const n_edge = extNormals[j];
+                // Badge / Dot
+                if (sticker && sticker.dot && sticker.dot.text) {
+                    const cx = sx + stickerSize / 2;
+                    const cy = sy + stickerSize / 2;
+                    const badgeRadius = 60;
 
-                // a = n_face x n_edge
-                const a = new THREE.Vector3().crossVectors(n_face, n_edge).normalize();
-                
-                // N = cos(theta)*n_face + sin(theta)*n_edge
-                const N = new THREE.Vector3()
-                    .addScaledVector(n_face, Math.cos(theta))
-                    .addScaledVector(n_edge, Math.sin(theta))
-                    .normalize();
-                
-                // Y_axis = N x a
-                const Y_axis = new THREE.Vector3().crossVectors(N, a).normalize();
+                    // Badge circle
+                    ctx.fillStyle = sticker.dot.color || '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, badgeRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = 5;
+                    ctx.stroke();
 
-                // Position P = 0.5*n_face + (0.5 + tabWidth/2)*n_edge + 0.25*orientedA
-                const signA = a.x * sx + a.y * sy + a.z * sz;
-                const orientedA = a.clone().multiplyScalar(signA > 0 ? 1 : -1);
-                
-                const pos = new THREE.Vector3()
-                    .addScaledVector(n_face, 0.5 + 0.01)
-                    .addScaledVector(n_edge, 0.5 + tabWidth / 2)
-                    .addScaledVector(orientedA, 0.25);
-
-                const geometry = new THREE.PlaneGeometry(tabLength, tabWidth);
-                const mat = new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
-                    side: THREE.FrontSide
-                });
-                const mesh = new THREE.Mesh(geometry, mat);
-
-                // Right-handed orthonormal basis
-                const crossCheck = new THREE.Vector3().crossVectors(orientedA, Y_axis).dot(N);
-                const finalY = crossCheck > 0 ? Y_axis : Y_axis.clone().negate();
-                
-                const basis = new THREE.Matrix4().makeBasis(orientedA, finalY, N);
-                mesh.quaternion.setFromRotationMatrix(basis);
-                mesh.position.copy(pos);
-
-                // Disable raycasting
-                mesh.raycast = () => {};
-
-                cubie.add(mesh);
-                perimeterFacets.push({
-                    mesh: mesh,
-                    cubie: cubie,
-                    reflectedNormal: n_edge.clone(),
-                    matIndex: getMatIndex(n_edge)
-                });
-            }
-        }
-    });
-
-    updatePerimeterFacets();
-}
-
-function updatePerimeterFacets() {
-    if (!perimeterFacetsEnabled) {
-        perimeterFacets.forEach(f => f.mesh.visible = false);
-        return;
-    }
-
-    perimeterFacets.forEach(f => {
-        f.mesh.visible = true;
-        const cubie = f.cubie;
-        const matIdx = f.matIndex;
-        const faceMat = cubie.material[matIdx];
-        
-        let colorHex = '#222222';
-        if (faceMat && faceMat.color) {
-            colorHex = '#' + faceMat.color.getHexString();
-        }
-
-        let dotText = '';
-        let dotColor = '#ffffff';
-        for (const d of dots) {
-            if (d.cubie === cubie && d.mesh.userData.localNormal.equals(f.reflectedNormal)) {
-                dotText = d.mesh.userData.text || '';
-                dotColor = d.mesh.userData.color || '#ffffff';
-                break;
+                    const text = sticker.dot.text;
+                    if (text.includes('\n')) {
+                        const lines = text.split('\n');
+                        const l1 = lines[0];
+                        const l2 = lines[1];
+                        ctx.fillStyle = '#000000';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.font = 'bold 28px sans-serif';
+                        ctx.fillText(l1.replace(/<\/?u>/g, ''), cx, cy - 20);
+                        drawTextWithUnderline(ctx, l2, cx, cy + 22, 'bold 32px sans-serif', 32);
+                    } else {
+                        const clean = text.replace(/<\/?u>/g, '');
+                        const fontSize = clean.length === 1 ? 64 : (clean.length === 2 ? 52 : 40);
+                        drawTextWithUnderline(ctx, text, cx, cy, 'bold ' + fontSize + 'px sans-serif', fontSize);
+                    }
+                }
             }
         }
 
-        const oldMap = f.mesh.material.map;
-        f.mesh.material.map = createFacetTexture(colorHex, dotText, dotColor);
-        f.mesh.material.needsUpdate = true;
-        if (oldMap) oldMap.dispose();
-    });
+        mirror.texture.needsUpdate = true;
+    }
 }
 
-function togglePerimeterFacets(forcedState) {
+function toggleFloatingSides(forcedState) {
     if (typeof forcedState === 'boolean') {
-        perimeterFacetsEnabled = forcedState;
+        floatingSidesEnabled = forcedState;
     } else {
-        perimeterFacetsEnabled = !perimeterFacetsEnabled;
+        floatingSidesEnabled = !floatingSidesEnabled;
     }
     
-    const btn = document.getElementById('btn-toggle-facets');
+    const btn = document.getElementById('btn-toggle-floating');
     if (btn) {
-        btn.classList.toggle('active', perimeterFacetsEnabled);
-        btn.innerText = '🪞 Facets: ' + (perimeterFacetsEnabled ? 'ON' : 'OFF');
+        btn.classList.toggle('active', floatingSidesEnabled);
+        btn.innerText = '🪞 Floating Sides: ' + (floatingSidesEnabled ? 'ON' : 'OFF');
     }
     
-    updatePerimeterFacets();
+    updateFloatingSides();
 }
 
-const btnToggleFacets = document.getElementById('btn-toggle-facets');
-if (btnToggleFacets) {
-    btnToggleFacets.addEventListener('click', () => {
-        togglePerimeterFacets();
+const btnToggleFloating = document.getElementById('btn-toggle-floating');
+if (btnToggleFloating) {
+    btnToggleFloating.addEventListener('click', () => {
+        toggleFloatingSides();
     });
 }
 
-// Initial perimeter facets creation
-createPerimeterFacets();
+// Initialize floating mirror sides
+initFloatingSides();

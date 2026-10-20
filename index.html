@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>3D 2x2x2 Rubik's Cube Simulator</title>
-  <link rel="stylesheet" href="style.css?v=23">
+  <link rel="stylesheet" href="style.css?v=24">
   <link rel="manifest" href="manifest.json">
   <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -21,7 +21,7 @@
       <div class="top-actions">
         <button id="btn-scramble" class="action-btn btn-scramble" title="Scramble Cube">Scramble</button>
         <button id="btn-reset" class="action-btn btn-reset" title="Reset Cube to Solved State">Reset</button>
-        <button id="btn-toggle-facets" class="action-btn btn-facets active" title="Toggle Perimeter Mirror Facets">🪞 Facets: ON</button>
+        <button id="btn-toggle-floating" class="action-btn btn-floating active" title="Toggle Floating Hidden Sides (Ruwix Mirror View)">🪞 Floating Sides: ON</button>
         <button id="btn-open-drawer" class="action-btn btn-facelets" title="Open Facelets Menu">🏷️ Facelets</button>
         <div class="settings-wrapper">
           <button id="btn-settings" class="action-btn btn-settings" title="Settings">⚙️</button>
@@ -131,11 +131,11 @@
     <div class="net-container" id="net-container"></div>
   </div>
 
-  <script src="cube.js?v=23"></script>
+  <script src="cube.js?v=24"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=23').then(reg => {
+        navigator.serviceWorker.register('sw.js?v=24').then(reg => {
           reg.update();
         }).catch(err => {
           console.log('ServiceWorker registration failed: ', err);
