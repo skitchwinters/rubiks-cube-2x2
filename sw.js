@@ -1,9 +1,9 @@
-const CACHE_NAME = 'cube2x2-cache-v21';
+const CACHE_NAME = 'cube2x2-cache-v22';
 const urlsToCache = [
   './',
   './index.html',
-  './style.css?v=21',
-  './cube.js?v=21',
+  './style.css?v=22',
+  './cube.js?v=22',
   './manifest.json',
   'https://unpkg.com/three@0.128.0/build/three.min.js',
   'https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js'

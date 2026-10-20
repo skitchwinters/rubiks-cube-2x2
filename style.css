@@ -278,6 +278,32 @@ body {
   background: rgba(255, 0, 85, 0.45);
 }
 
+.btn-facets {
+  color: #ffb703;
+}
+
+.btn-facets.active {
+  background: rgba(255, 183, 3, 0.22);
+  border-color: #ffb703;
+  box-shadow: 0 0 10px rgba(255, 183, 3, 0.45);
+}
+
+[data-theme="cyberpunk"] .btn-facets {
+  color: #ffb703;
+  border-color: #ffb703;
+}
+[data-theme="cyberpunk"] .btn-facets.active {
+  background: rgba(255, 183, 3, 0.35);
+}
+
+[data-theme="carbon"] .btn-facets {
+  color: #ffb703;
+  border-color: #ffb703;
+}
+[data-theme="carbon"] .btn-facets.active {
+  background: rgba(255, 183, 3, 0.35);
+}
+
 [data-theme="cyberpunk"] .btn-facelets {
   background: rgba(0, 255, 204, 0.15);
   color: #00ffcc;

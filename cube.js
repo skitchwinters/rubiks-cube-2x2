@@ -133,6 +133,7 @@ function createCube() {
         }
     }
     if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
 }
 createCube();
 
@@ -326,6 +327,7 @@ function snapAndUngroup() {
             playTurnSound();
             animationInProgress = false;
             if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
             
             if (snapRot !== 0) {
                 recordMove();
@@ -379,6 +381,7 @@ function performProgrammaticMove(axis, coord, direction, duration=200) {
                 playTurnSound();
                 animationInProgress = false;
                 if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
                 resolve();
             }
         }
@@ -445,6 +448,7 @@ function resetCube() {
     resetCamera(350);
     playTurnSound();
     if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
 }
 
 async function scrambleCube() {
@@ -801,12 +805,14 @@ function addDotToFace(cubie, localNormal, customText, customColor) {
     
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
 }
 
 function updateDotTexture(dotObj) {
     dotObj.mesh.material.map = createDotTexture(dotObj.mesh.userData.text, dotObj.mesh.userData.color);
     dotObj.mesh.material.map.needsUpdate = true;
     if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
 }
 
 function removeDot(id) {
@@ -817,6 +823,7 @@ function removeDot(id) {
         dots.splice(idx, 1);
         renderDotList();
         if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
     }
 }
 
@@ -826,6 +833,7 @@ function clearAllDots() {
     dotColorIndex = 0;
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
 }
 
 function renderDotList() {
@@ -1009,6 +1017,7 @@ window.loadDotConfig = function(name) {
     
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
 }
 
 window.deleteConfig = function(name) {
@@ -1390,6 +1399,7 @@ function applyFullCubeNaming(scheme) {
 
     renderDotList();
     if (typeof render2DNet === 'function') render2DNet();
+    if (typeof createPerimeterFacets === 'function') createPerimeterFacets();
 }
 
 const btnNamingGap = document.getElementById('btn-naming-gap');
@@ -1413,3 +1423,224 @@ if (btnNamingBoth) {
         applyFullCubeNaming('both');
     });
 }
+
+
+// --- Perimeter Mirror Facets (Ruwix / Solver Style) ---
+let perimeterFacets = [];
+let perimeterFacetsEnabled = true;
+
+function createFacetTexture(bgColor, dotText, dotColor) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    // 1. Background color of the reflected face
+    ctx.fillStyle = bgColor || '#222222';
+    ctx.fillRect(0, 0, 128, 64);
+
+    // 2. Beveled Mirror Border (chrome / glass edge look)
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(0, 0, 128, 64);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(4, 4, 120, 56);
+
+    // 3. Subtle diagonal glass reflection highlight
+    const grad = ctx.createLinearGradient(0, 0, 128, 64);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0.28)');
+    grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.0)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0.18)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 128, 64);
+
+    // 4. If dotText exists, render badge
+    if (dotText) {
+        ctx.fillStyle = dotColor || '#ffffff';
+        ctx.beginPath();
+        ctx.arc(64, 32, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        if (dotText.includes('\n')) {
+            const lines = dotText.split('\n');
+            const l1 = lines[0];
+            const l2 = lines[1];
+            ctx.fillStyle = '#000000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillText(l1.replace(/<\/?u>/g, ''), 64, 23);
+            drawTextWithUnderline(ctx, l2, 64, 41, 'bold 13px sans-serif', 13);
+        } else {
+            const clean = dotText.replace(/<\/?u>/g, '');
+            const fontSize = clean.length === 1 ? 26 : (clean.length === 2 ? 21 : 16);
+            drawTextWithUnderline(ctx, dotText, 64, 32, 'bold ' + fontSize + 'px sans-serif', fontSize);
+        }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
+function getMatIndex(norm) {
+    if (norm.x > 0.5) return 0;
+    if (norm.x < -0.5) return 1;
+    if (norm.y > 0.5) return 2;
+    if (norm.y < -0.5) return 3;
+    if (norm.z > 0.5) return 4;
+    return 5;
+}
+
+function createPerimeterFacets() {
+    if (perimeterFacets.length > 0 && cubies.length === 8 && perimeterFacets[0].mesh.parent === cubies[0]) {
+        updatePerimeterFacets();
+        return;
+    }
+
+    // Clear old facets if any
+    perimeterFacets.forEach(f => {
+        if (f.mesh.parent) f.mesh.parent.remove(f.mesh);
+        if (f.mesh.material.map) f.mesh.material.map.dispose();
+        f.mesh.material.dispose();
+    });
+    perimeterFacets = [];
+
+    const tabLength = 0.44;
+    const tabWidth = 0.22;
+    const theta = Math.PI / 6; // 30 deg tilt outward
+
+    cubies.forEach(cubie => {
+        const initPos = cubie.userData.initialPosition;
+        const sx = Math.sign(initPos.x);
+        const sy = Math.sign(initPos.y);
+        const sz = Math.sign(initPos.z);
+
+        const extNormals = [
+            new THREE.Vector3(sx, 0, 0),
+            new THREE.Vector3(0, sy, 0),
+            new THREE.Vector3(0, 0, sz)
+        ];
+
+        for (let i = 0; i < 3; i++) {
+            const n_face = extNormals[i];
+            for (let j = 0; j < 3; j++) {
+                if (i === j) continue;
+                const n_edge = extNormals[j];
+
+                // a = n_face x n_edge
+                const a = new THREE.Vector3().crossVectors(n_face, n_edge).normalize();
+                
+                // N = cos(theta)*n_face + sin(theta)*n_edge
+                const N = new THREE.Vector3()
+                    .addScaledVector(n_face, Math.cos(theta))
+                    .addScaledVector(n_edge, Math.sin(theta))
+                    .normalize();
+                
+                // Y_axis = N x a
+                const Y_axis = new THREE.Vector3().crossVectors(N, a).normalize();
+
+                // Position P = 0.5*n_face + (0.5 + tabWidth/2)*n_edge + 0.25*orientedA
+                const signA = a.x * sx + a.y * sy + a.z * sz;
+                const orientedA = a.clone().multiplyScalar(signA > 0 ? 1 : -1);
+                
+                const pos = new THREE.Vector3()
+                    .addScaledVector(n_face, 0.5 + 0.01)
+                    .addScaledVector(n_edge, 0.5 + tabWidth / 2)
+                    .addScaledVector(orientedA, 0.25);
+
+                const geometry = new THREE.PlaneGeometry(tabLength, tabWidth);
+                const mat = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    side: THREE.FrontSide
+                });
+                const mesh = new THREE.Mesh(geometry, mat);
+
+                // Right-handed orthonormal basis
+                const crossCheck = new THREE.Vector3().crossVectors(orientedA, Y_axis).dot(N);
+                const finalY = crossCheck > 0 ? Y_axis : Y_axis.clone().negate();
+                
+                const basis = new THREE.Matrix4().makeBasis(orientedA, finalY, N);
+                mesh.quaternion.setFromRotationMatrix(basis);
+                mesh.position.copy(pos);
+
+                // Disable raycasting
+                mesh.raycast = () => {};
+
+                cubie.add(mesh);
+                perimeterFacets.push({
+                    mesh: mesh,
+                    cubie: cubie,
+                    reflectedNormal: n_edge.clone(),
+                    matIndex: getMatIndex(n_edge)
+                });
+            }
+        }
+    });
+
+    updatePerimeterFacets();
+}
+
+function updatePerimeterFacets() {
+    if (!perimeterFacetsEnabled) {
+        perimeterFacets.forEach(f => f.mesh.visible = false);
+        return;
+    }
+
+    perimeterFacets.forEach(f => {
+        f.mesh.visible = true;
+        const cubie = f.cubie;
+        const matIdx = f.matIndex;
+        const faceMat = cubie.material[matIdx];
+        
+        let colorHex = '#222222';
+        if (faceMat && faceMat.color) {
+            colorHex = '#' + faceMat.color.getHexString();
+        }
+
+        let dotText = '';
+        let dotColor = '#ffffff';
+        for (const d of dots) {
+            if (d.cubie === cubie && d.mesh.userData.localNormal.equals(f.reflectedNormal)) {
+                dotText = d.mesh.userData.text || '';
+                dotColor = d.mesh.userData.color || '#ffffff';
+                break;
+            }
+        }
+
+        const oldMap = f.mesh.material.map;
+        f.mesh.material.map = createFacetTexture(colorHex, dotText, dotColor);
+        f.mesh.material.needsUpdate = true;
+        if (oldMap) oldMap.dispose();
+    });
+}
+
+function togglePerimeterFacets(forcedState) {
+    if (typeof forcedState === 'boolean') {
+        perimeterFacetsEnabled = forcedState;
+    } else {
+        perimeterFacetsEnabled = !perimeterFacetsEnabled;
+    }
+    
+    const btn = document.getElementById('btn-toggle-facets');
+    if (btn) {
+        btn.classList.toggle('active', perimeterFacetsEnabled);
+        btn.innerText = '🪞 Facets: ' + (perimeterFacetsEnabled ? 'ON' : 'OFF');
+    }
+    
+    updatePerimeterFacets();
+}
+
+const btnToggleFacets = document.getElementById('btn-toggle-facets');
+if (btnToggleFacets) {
+    btnToggleFacets.addEventListener('click', () => {
+        togglePerimeterFacets();
+    });
+}
+
+// Initial perimeter facets creation
+createPerimeterFacets();
