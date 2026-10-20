@@ -23,7 +23,7 @@ function playTurnSound() {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(3, 3.5, 8.5);
+camera.position.set(4.5, 3.8, 6.8);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -88,7 +88,7 @@ const MIRROR_SIZE = 2.05;
 
 const mirrorConfigs = {
     D: { // Down face (Yellow) - lies in XZ plane, normal +Y (facing up towards camera)
-        pos: new THREE.Vector3(0, -MIRROR_DIST, 0),
+        pos: new THREE.Vector3(0.1, -2.9, 0.4),
         rot: new THREE.Euler(-Math.PI / 2, 0, 0),
         quadrants: [
             [ [1, 0], [1, 1] ],
@@ -96,7 +96,7 @@ const mirrorConfigs = {
         ]
     },
     U: { // Up face (White) - lies in XZ plane, normal -Y (facing down towards camera)
-        pos: new THREE.Vector3(0, MIRROR_DIST, 0),
+        pos: new THREE.Vector3(-0.1, 2.9, -0.4),
         rot: new THREE.Euler(Math.PI / 2, 0, 0),
         quadrants: [
             [ [0, 0], [0, 1] ],
@@ -104,7 +104,7 @@ const mirrorConfigs = {
         ]
     },
     L: { // Left face (Orange) - lies in YZ plane, normal +X (facing right towards camera)
-        pos: new THREE.Vector3(-MIRROR_DIST, 0, 0),
+        pos: new THREE.Vector3(-2.6, 2.0, -0.8),
         rot: new THREE.Euler(0, Math.PI / 2, 0),
         quadrants: [
             [ [0, 1], [0, 0] ],
@@ -112,7 +112,7 @@ const mirrorConfigs = {
         ]
     },
     R: { // Right face (Red) - lies in YZ plane, normal -X (facing left towards camera)
-        pos: new THREE.Vector3(MIRROR_DIST, 0, 0),
+        pos: new THREE.Vector3(2.6, -2.0, 0.8),
         rot: new THREE.Euler(0, -Math.PI / 2, 0),
         quadrants: [
             [ [0, 0], [0, 1] ],
@@ -120,7 +120,7 @@ const mirrorConfigs = {
         ]
     },
     B: { // Back face (Blue) - lies in XY plane, normal +Z (facing forward towards camera)
-        pos: new THREE.Vector3(0, 0, -MIRROR_DIST),
+        pos: new THREE.Vector3(1.8, 2.0, -2.4),
         rot: new THREE.Euler(0, 0, 0),
         quadrants: [
             [ [0, 1], [0, 0] ],
@@ -128,7 +128,7 @@ const mirrorConfigs = {
         ]
     },
     F: { // Front face (Green) - lies in XY plane, normal -Z (facing backward towards camera)
-        pos: new THREE.Vector3(0, 0, MIRROR_DIST),
+        pos: new THREE.Vector3(-1.8, -2.0, 2.4),
         rot: new THREE.Euler(0, Math.PI, 0),
         quadrants: [
             [ [0, 0], [0, 1] ],
@@ -480,7 +480,7 @@ function recordMove() {
     // We just note a change happened.
 }
 
-const INITIAL_CAMERA_POS = new THREE.Vector3(3, 3.5, 8.5);
+const INITIAL_CAMERA_POS = new THREE.Vector3(4.5, 3.8, 6.8);
 const INITIAL_TARGET_POS = new THREE.Vector3(0, 0, 0);
 
 function resetCamera(duration = 350) {
@@ -1695,6 +1695,10 @@ function toggleFloatingSides(forcedState) {
         btn.innerText = '🪞 Floating Sides: ' + (floatingSidesEnabled ? 'ON' : 'OFF');
     }
     
+    if (floatingSidesEnabled && typeof resetCamera === 'function') {
+        resetCamera(400);
+    }
+
     updateFloatingSides();
 }
 
