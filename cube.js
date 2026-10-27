@@ -24,6 +24,7 @@ const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.position.set(4.5, 3.8, 6.8);
+scene.add(camera);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -31,6 +32,11 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 container.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.addEventListener('change', () => {
+    if (floatingSidesEnabled && typeof updateFloatingSides === 'function') {
+        updateFloatingSides();
+    }
+});
 controls.enablePan = false;
 controls.enableDamping = true;
 controls.mouseButtons = {
@@ -77,64 +83,21 @@ let dotMode = false;
 let dotColorIndex = 0;
 const dotColors = ['#00FFFF', '#FF00FF', '#00FF00', '#FFA500', '#800080', '#FFFF00', '#FFC0CB', '#0000FF'];
 
-// --- Floating Hidden Sides State (Declared early to eliminate TDZ ReferenceErrors) ---
+// --- View-Relative Floating Hidden Sides State (Declared early to eliminate TDZ ReferenceErrors) ---
 const floatingSidesGroup = new THREE.Group();
-scene.add(floatingSidesGroup);
+camera.add(floatingSidesGroup);
 let floatingSidesEnabled = true;
 let floatingMirrors = {};
 
-const MIRROR_DIST = 2.45;
 const MIRROR_SIZE = 2.05;
 
-const mirrorConfigs = {
-    D: { // Down face (Yellow) - lies in XZ plane, normal +Y (facing up towards camera)
-        pos: new THREE.Vector3(0.1, -2.9, 0.4),
-        rot: new THREE.Euler(-Math.PI / 2, 0, 0),
-        quadrants: [
-            [ [1, 0], [1, 1] ],
-            [ [0, 0], [0, 1] ]
-        ]
-    },
-    U: { // Up face (White) - lies in XZ plane, normal -Y (facing down towards camera)
-        pos: new THREE.Vector3(-0.1, 2.9, -0.4),
-        rot: new THREE.Euler(Math.PI / 2, 0, 0),
-        quadrants: [
-            [ [0, 0], [0, 1] ],
-            [ [1, 0], [1, 1] ]
-        ]
-    },
-    L: { // Left face (Orange) - lies in YZ plane, normal +X (facing right towards camera)
-        pos: new THREE.Vector3(-2.6, 2.0, -0.8),
-        rot: new THREE.Euler(0, Math.PI / 2, 0),
-        quadrants: [
-            [ [0, 1], [0, 0] ],
-            [ [1, 1], [1, 0] ]
-        ]
-    },
-    R: { // Right face (Red) - lies in YZ plane, normal -X (facing left towards camera)
-        pos: new THREE.Vector3(2.6, -2.0, 0.8),
-        rot: new THREE.Euler(0, -Math.PI / 2, 0),
-        quadrants: [
-            [ [0, 0], [0, 1] ],
-            [ [1, 0], [1, 1] ]
-        ]
-    },
-    B: { // Back face (Blue) - lies in XY plane, normal +Z (facing forward towards camera)
-        pos: new THREE.Vector3(1.8, 2.0, -2.4),
-        rot: new THREE.Euler(0, 0, 0),
-        quadrants: [
-            [ [0, 1], [0, 0] ],
-            [ [1, 1], [1, 0] ]
-        ]
-    },
-    F: { // Front face (Green) - lies in XY plane, normal -Z (facing backward towards camera)
-        pos: new THREE.Vector3(-1.8, -2.0, 2.4),
-        rot: new THREE.Euler(0, Math.PI, 0),
-        quadrants: [
-            [ [0, 0], [0, 1] ],
-            [ [1, 0], [1, 1] ]
-        ]
-    }
+const faceNormals = {
+    U: new THREE.Vector3(0, 1, 0),
+    D: new THREE.Vector3(0, -1, 0),
+    F: new THREE.Vector3(0, 0, 1),
+    B: new THREE.Vector3(0, 0, -1),
+    R: new THREE.Vector3(1, 0, 0),
+    L: new THREE.Vector3(-1, 0, 0)
 };
 
 // Materials Factory
@@ -272,28 +235,22 @@ function onInputDown(event) {
         const clientY = event.touches ? event.touches[0].clientY : event.clientY;
         startMousePos.set(clientX, clientY);
         dragAxis = null;
-    } else if (dotMode && floatingSidesEnabled && typeof mirrorConfigs !== 'undefined') {
+    } else if (dotMode && floatingSidesEnabled) {
         // Check if user clicked a floating mirror sticker directly
         const mirrorMeshes = Object.values(floatingMirrors).map(m => m.mesh);
         const mirrorHits = raycaster.intersectObjects(mirrorMeshes);
         if (mirrorHits.length > 0) {
             const hit = mirrorHits[0];
-            const faceKey = hit.object.userData.faceKey;
             const uv = hit.uv;
-            if (faceKey && uv) {
+            if (uv && hit.object.userData && hit.object.userData.quadrants) {
                 const qr = uv.y < 0.5 ? 1 : 0;
                 const qc = uv.x < 0.5 ? 0 : 1;
-                const cfg = mirrorConfigs[faceKey];
-                if (cfg && typeof getCube2DState === 'function') {
-                    const [sr, sc] = cfg.quadrants[qr][qc];
-                    const state = getCube2DState();
-                    const sticker = state[faceKey] && state[faceKey][sr] ? state[faceKey][sr][sc] : null;
-                    if (sticker && sticker.cubie && sticker.localNormal) {
-                        controls.enabled = false;
-                        if (!event.touches) event.preventDefault();
-                        addDotToFace(sticker.cubie, sticker.localNormal);
-                        return;
-                    }
+                const stickerInfo = hit.object.userData.quadrants[qr] ? hit.object.userData.quadrants[qr][qc] : null;
+                if (stickerInfo && stickerInfo.cubie && stickerInfo.localNormal) {
+                    controls.enabled = false;
+                    if (!event.touches) event.preventDefault();
+                    addDotToFace(stickerInfo.cubie, stickerInfo.localNormal);
+                    return;
                 }
             }
         }
@@ -1511,7 +1468,57 @@ if (btnNamingBoth) {
 }
 
 
-// --- Floating Hidden Sides (Ruwix "Floating hidden sides" Style) ---
+// --- Floating Hidden Sides (View-Relative Ruwix Mirror Style) ---
+
+function getCameraAxes() {
+    const target = (controls && controls.target) ? controls.target : new THREE.Vector3(0, 0, 0);
+    const fwd = target.clone().sub(camera.position).normalize();
+    const upRef = Math.abs(fwd.y) > 0.95 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(fwd, upRef).normalize();
+    const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+    return { fwd, up, right };
+}
+
+function identifyHiddenFaces() {
+    const axes = getCameraAxes();
+    
+    // 1. Bottom face: face whose normal minimizes N . up
+    let bottomFace = 'D';
+    let minUpDot = Infinity;
+    for (const [key, n] of Object.entries(faceNormals)) {
+        const d = n.dot(axes.up);
+        if (d < minUpDot) {
+            minUpDot = d;
+            bottomFace = key;
+        }
+    }
+
+    // 2. Back-Left & Back-Right: among remaining faces that face away from camera (N . fwd > -0.35)
+    let backLeftFace = 'L';
+    let minRightDot = Infinity;
+    let backRightFace = 'B';
+    let maxRightDot = -Infinity;
+
+    for (const [key, n] of Object.entries(faceNormals)) {
+        if (key === bottomFace) continue;
+        const fwdDot = n.dot(axes.fwd);
+        const rightDot = n.dot(axes.right);
+
+        if (fwdDot > -0.35) {
+            if (rightDot < minRightDot) {
+                minRightDot = rightDot;
+                backLeftFace = key;
+            }
+            if (rightDot > maxRightDot) {
+                maxRightDot = rightDot;
+                backRightFace = key;
+            }
+        }
+    }
+
+    return { bottomFace, backLeftFace, backRightFace };
+}
+
 function roundRect(ctx, x, y, w, h, r) {
     if (typeof ctx.roundRect === 'function') {
         ctx.roundRect(x, y, w, h, r);
@@ -1529,35 +1536,63 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 function initFloatingSides() {
-    if (Object.keys(floatingMirrors).length === 6) {
+    if (Object.keys(floatingMirrors).length === 3) {
         updateFloatingSides();
         return;
     }
 
+    // Clear old if any
+    while (floatingSidesGroup.children.length > 0) {
+        const child = floatingSidesGroup.children[0];
+        floatingSidesGroup.remove(child);
+        if (child.material) {
+            if (child.material.map) child.material.map.dispose();
+            child.material.dispose();
+        }
+    }
+    floatingMirrors = {};
+
+    const mirrorDefs = {
+        bottom: {
+            name: 'Bottom',
+            posOffset: new THREE.Vector3(0, -2.85, 0),
+            rot: new THREE.Euler(-0.55, 0, 0)
+        },
+        topLeft: {
+            name: 'Top-Left',
+            posOffset: new THREE.Vector3(-2.8, 2.15, 0),
+            rot: new THREE.Euler(0.18, 0.45, -0.06)
+        },
+        topRight: {
+            name: 'Top-Right',
+            posOffset: new THREE.Vector3(2.8, 2.15, 0),
+            rot: new THREE.Euler(0.18, -0.45, 0.06)
+        }
+    };
+
     const geometry = new THREE.PlaneGeometry(MIRROR_SIZE, MIRROR_SIZE);
 
-    for (const [faceKey, cfg] of Object.entries(mirrorConfigs)) {
+    for (const [mKey, def] of Object.entries(mirrorDefs)) {
         const canvas = document.createElement('canvas');
         canvas.width = 512;
         canvas.height = 512;
         const texture = new THREE.CanvasTexture(canvas);
         const material = new THREE.MeshBasicMaterial({
             map: texture,
-            side: THREE.FrontSide, // Crucial: automatically culls mirrors facing away from camera!
+            side: THREE.FrontSide,
             transparent: true
         });
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.copy(cfg.pos);
-        mesh.rotation.copy(cfg.rot);
-        mesh.userData = { faceKey: faceKey };
-        
+        mesh.rotation.copy(def.rot);
+        mesh.userData = { mirrorKey: mKey, quadrants: [[null, null], [null, null]] };
+
         floatingSidesGroup.add(mesh);
-        floatingMirrors[faceKey] = {
+        floatingMirrors[mKey] = {
             mesh: mesh,
             canvas: canvas,
             ctx: canvas.getContext('2d'),
             texture: texture,
-            config: cfg
+            posOffset: def.posOffset
         };
     }
 
@@ -1571,7 +1606,7 @@ function updateFloatingSides() {
     }
     floatingSidesGroup.visible = true;
 
-    if (Object.keys(floatingMirrors).length < 6) {
+    if (Object.keys(floatingMirrors).length < 3) {
         initFloatingSides();
         return;
     }
@@ -1579,21 +1614,48 @@ function updateFloatingSides() {
     if (typeof getCube2DState !== 'function') return;
     const state = getCube2DState();
 
+    // Dynamically adjust mirror distance & scale based on camera distance to maintain scale
+    const target = (controls && controls.target) ? controls.target : new THREE.Vector3(0, 0, 0);
+    const dist = camera.position.distanceTo(target);
+    const factor = dist / 8.5;
+
+    for (const [mKey, mirror] of Object.entries(floatingMirrors)) {
+        mirror.mesh.position.set(
+            mirror.posOffset.x * factor,
+            mirror.posOffset.y * factor,
+            -dist * 1.01
+        );
+        mirror.mesh.scale.set(factor, factor, factor);
+    }
+
+    // Determine the 3 hidden faces relative to current camera perspective
+    const { bottomFace, backLeftFace, backRightFace } = identifyHiddenFaces();
+
+    const mirrorFaceMap = {
+        bottom: bottomFace,
+        topLeft: backLeftFace,
+        topRight: backRightFace
+    };
+
+    const axes = getCameraAxes();
+
     const stickerSize = 236;
     const margin = 16;
     const gap = 8;
-    const positions = [
-        [margin, margin],                                     // (0,0) Top-Left
-        [margin + stickerSize + gap, margin],                 // (0,1) Top-Right
-        [margin, margin + stickerSize + gap],                 // (1,0) Bottom-Left
+    const quadPositions = [
+        [margin, margin],                                        // (0,0) Top-Left
+        [margin + stickerSize + gap, margin],                    // (0,1) Top-Right
+        [margin, margin + stickerSize + gap],                    // (1,0) Bottom-Left
         [margin + stickerSize + gap, margin + stickerSize + gap] // (1,1) Bottom-Right
     ];
 
-    for (const [faceKey, mirror] of Object.entries(floatingMirrors)) {
+    for (const [mKey, faceKey] of Object.entries(mirrorFaceMap)) {
+        const mirror = floatingMirrors[mKey];
+        if (!mirror) continue;
         const ctx = mirror.ctx;
         ctx.clearRect(0, 0, 512, 512);
 
-        // 1. Dark background panel / bevel frame
+        // 1. Sleek dark background panel / bevel frame
         ctx.fillStyle = '#0e0e14';
         ctx.beginPath();
         roundRect(ctx, 4, 4, 504, 504, 20);
@@ -1610,15 +1672,82 @@ function updateFloatingSides() {
         const faceData = state[faceKey];
         if (!faceData) continue;
 
-        const quadMap = mirror.config.quadrants;
+        // Collect the 4 stickers on this face
+        const rawStickers = [];
+        for (let r = 0; r < 2; r++) {
+            for (let c = 0; c < 2; c++) {
+                if (faceData[r] && faceData[r][c]) {
+                    rawStickers.push(faceData[r][c]);
+                }
+            }
+        }
+        if (rawStickers.length < 4) continue;
+
+        // Project each sticker's cubie position into camera space
+        const projected = rawStickers.map(st => {
+            const wPos = st.cubie.getWorldPosition(new THREE.Vector3());
+            const rel = wPos.sub(camera.position);
+            return {
+                sticker: st,
+                camX: rel.dot(axes.right),
+                camY: rel.dot(axes.up),
+                camZ: rel.dot(axes.fwd)
+            };
+        });
+
+        // Compute centroids for sorting
+        const midX = projected.reduce((sum, p) => sum + p.camX, 0) / 4;
+        const midY = projected.reduce((sum, p) => sum + p.camY, 0) / 4;
+        const midZ = projected.reduce((sum, p) => sum + p.camZ, 0) / 4;
+
+        // Sort into quadrants [row, col]
+        const sortedGrid = [[null, null], [null, null]];
+
+        projected.forEach(p => {
+            let row = 0;
+            let col = 0;
+
+            if (mKey === 'bottom') {
+                // In bottom mirror:
+                // deeper along fwd (larger camZ) is further from viewer -> row 0 (top of mirror)
+                // closer along fwd (smaller camZ) is closer to viewer -> row 1 (bottom of mirror)
+                row = p.camZ > midZ ? 0 : 1;
+                // left relative to camera -> col 0, right -> col 1
+                col = p.camX > midX ? 1 : 0;
+            } else {
+                // In side mirrors (topLeft, topRight):
+                // higher relative to camera (larger camY) -> row 0 (top of mirror)
+                // lower relative to camera (smaller camY) -> row 1 (bottom of mirror)
+                row = p.camY > midY ? 0 : 1;
+                // left relative to camera -> col 0, right -> col 1
+                col = p.camX > midX ? 1 : 0;
+            }
+
+            // Fallback safety to avoid collision
+            if (sortedGrid[row][col] === null) {
+                sortedGrid[row][col] = p.sticker;
+            } else {
+                // fill alternative slot if duplicate
+                for (let r = 0; r < 2; r++) {
+                    for (let c = 0; c < 2; c++) {
+                        if (sortedGrid[r][c] === null) {
+                            sortedGrid[r][c] = p.sticker;
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Store quadrant mapping for raycasting
+        mirror.mesh.userData.quadrants = sortedGrid;
 
         // Draw 4 stickers
         for (let qr = 0; qr < 2; qr++) {
             for (let qc = 0; qc < 2; qc++) {
-                const [sr, sc] = quadMap[qr][qc];
-                const sticker = faceData[sr] ? faceData[sr][sc] : null;
+                const sticker = sortedGrid[qr][qc];
                 const posIdx = qr * 2 + qc;
-                const [sx, sy] = positions[posIdx];
+                const [sx, sy] = quadPositions[posIdx];
 
                 const color = sticker ? sticker.color : (colors[faceKey] ? '#' + colors[faceKey].toString(16).padStart(6, '0') : '#222222');
 
