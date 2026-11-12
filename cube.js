@@ -88,6 +88,7 @@ const floatingSidesGroup = new THREE.Group();
 camera.add(floatingSidesGroup);
 let floatingSidesEnabled = true;
 let floatingMirrors = {};
+let lastValidCubeState = null;
 
 const MIRROR_SIZE = 2.05;
 
@@ -99,6 +100,27 @@ const faceNormals = {
     R: new THREE.Vector3(1, 0, 0),
     L: new THREE.Vector3(-1, 0, 0)
 };
+
+const CARDINAL_AXES = [
+    new THREE.Vector3( 1,  0,  0),
+    new THREE.Vector3(-1,  0,  0),
+    new THREE.Vector3( 0,  1,  0),
+    new THREE.Vector3( 0, -1,  0),
+    new THREE.Vector3( 0,  0,  1),
+    new THREE.Vector3( 0,  0, -1)
+];
+
+// --- Interaction State (Declared early to avoid TDZ errors during initial createCube) ---
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let isDragging = false;
+let activeMesh = null;
+let activeFaceNormal = null;
+let startMousePos = new THREE.Vector2();
+let dragAxis = null;
+const dragGroup = new THREE.Group();
+scene.add(dragGroup);
+let animationInProgress = false;
 
 // Materials Factory
 function getMaterials(theme) {
@@ -180,16 +202,6 @@ document.getElementById('theme-select').addEventListener('change', (e) => {
 });
 
 // --- Interaction (Raycast Dragging) ---
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-let isDragging = false;
-let activeMesh = null;
-let activeFaceNormal = null;
-let startMousePos = new THREE.Vector2();
-let dragAxis = null;
-let dragGroup = new THREE.Group();
-scene.add(dragGroup);
-let animationInProgress = false;
 
 function getIntersect(event) {
     const clientX = event.touches ? event.touches[0].clientX : event.clientX;
@@ -327,6 +339,39 @@ function onInputUp(event) {
     }
 }
 
+// Snap a cubie's position to grid multiples of `offset` and orthogonalize its orientation in SO(3) without Euler gimbal lock.
+function snapCubieTransform(cubie) {
+    cubie.position.x = Math.round(cubie.position.x / offset) * offset;
+    cubie.position.y = Math.round(cubie.position.y / offset) * offset;
+    cubie.position.z = Math.round(cubie.position.z / offset) * offset;
+
+    const m = new THREE.Matrix4().makeRotationFromQuaternion(cubie.quaternion);
+    const e = m.elements;
+    const snapAxis = (x, y, z, forbiddenIdx = -1) => {
+        const vals = [x, y, z];
+        let bestIdx = -1;
+        let bestAbs = -1;
+        for (let i = 0; i < 3; i++) {
+            if (i === forbiddenIdx) continue;
+            const a = Math.abs(vals[i]);
+            if (a > bestAbs) {
+                bestAbs = a;
+                bestIdx = i;
+            }
+        }
+        const out = new THREE.Vector3(0, 0, 0);
+        out.setComponent(bestIdx, vals[bestIdx] >= 0 ? 1 : -1);
+        return { vec: out, idx: bestIdx };
+    };
+
+    const c0 = snapAxis(e[0], e[1], e[2]);
+    const c1 = snapAxis(e[4], e[5], e[6], c0.idx);
+    const c2 = new THREE.Vector3().crossVectors(c0.vec, c1.vec);
+    m.makeBasis(c0.vec, c1.vec, c2);
+    cubie.quaternion.setFromRotationMatrix(m);
+    cubie.updateMatrixWorld();
+}
+
 function snapAndUngroup() {
     animationInProgress = true;
     
@@ -352,25 +397,14 @@ function snapAndUngroup() {
             const children = [...dragGroup.children];
             children.forEach(c => {
                 cubeGroup.attach(c);
-                
-                // Snap Position
-                c.position.x = Math.round(c.position.x / offset) * offset;
-                c.position.y = Math.round(c.position.y / offset) * offset;
-                c.position.z = Math.round(c.position.z / offset) * offset;
-                
-                // Snap Rotation
-                const euler = new THREE.Euler().setFromQuaternion(c.quaternion);
-                euler.x = Math.round(euler.x / (Math.PI/2)) * (Math.PI/2);
-                euler.y = Math.round(euler.y / (Math.PI/2)) * (Math.PI/2);
-                euler.z = Math.round(euler.z / (Math.PI/2)) * (Math.PI/2);
-                c.quaternion.setFromEuler(euler);
+                snapCubieTransform(c);
             });
             
             dragGroup.rotation.set(0,0,0);
             playTurnSound();
             animationInProgress = false;
             if (typeof render2DNet === 'function') render2DNet();
-    if (typeof updateFloatingSides === 'function') updateFloatingSides();
+            if (typeof updateFloatingSides === 'function') updateFloatingSides();
             
             if (snapRot !== 0) {
                 recordMove();
@@ -410,21 +444,13 @@ function performProgrammaticMove(axis, coord, direction, duration=200) {
                 const children = [...dragGroup.children];
                 children.forEach(c => {
                     cubeGroup.attach(c);
-                    c.position.x = Math.round(c.position.x / offset) * offset;
-                    c.position.y = Math.round(c.position.y / offset) * offset;
-                    c.position.z = Math.round(c.position.z / offset) * offset;
-                    
-                    const euler = new THREE.Euler().setFromQuaternion(c.quaternion);
-                    euler.x = Math.round(euler.x / (Math.PI/2)) * (Math.PI/2);
-                    euler.y = Math.round(euler.y / (Math.PI/2)) * (Math.PI/2);
-                    euler.z = Math.round(euler.z / (Math.PI/2)) * (Math.PI/2);
-                    c.quaternion.setFromEuler(euler);
+                    snapCubieTransform(c);
                 });
                 dragGroup.rotation.set(0,0,0);
                 playTurnSound();
                 animationInProgress = false;
                 if (typeof render2DNet === 'function') render2DNet();
-    if (typeof updateFloatingSides === 'function') updateFloatingSides();
+                if (typeof updateFloatingSides === 'function') updateFloatingSides();
                 resolve();
             }
         }
@@ -610,6 +636,9 @@ window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    if (floatingSidesEnabled && typeof updateFloatingSides === 'function') {
+        updateFloatingSides();
+    }
 });
 
 // --- Animation Loop ---
@@ -1171,8 +1200,13 @@ function getCube2DState() {
         new THREE.Vector3( 0,  0, -1)  // 5: -z (B)
     ];
 
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    const worldNorm = new THREE.Vector3();
+
     cubies.forEach(cubie => {
-        const worldPos = cubie.getWorldPosition(new THREE.Vector3());
+        cubie.getWorldPosition(worldPos);
+        cubie.getWorldQuaternion(worldQuat);
         const gx = Math.round(worldPos.x / offset);
         const gy = Math.round(worldPos.y / offset);
         const gz = Math.round(worldPos.z / offset);
@@ -1181,7 +1215,7 @@ function getCube2DState() {
             const mat = cubie.material[i];
             if (!mat || mat === coreMaterial) continue;
 
-            const worldNorm = localNormals[i].clone().applyQuaternion(cubie.quaternion).round();
+            worldNorm.copy(localNormals[i]).applyQuaternion(worldQuat).round();
             let faceKey = null;
             let row = null;
             let col = null;
@@ -1471,52 +1505,168 @@ if (btnNamingBoth) {
 // --- Floating Hidden Sides (View-Relative Ruwix Mirror Style) ---
 
 function getCameraAxes() {
-    const target = (controls && controls.target) ? controls.target : new THREE.Vector3(0, 0, 0);
-    const fwd = target.clone().sub(camera.position).normalize();
-    const upRef = Math.abs(fwd.y) > 0.95 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
-    const right = new THREE.Vector3().crossVectors(fwd, upRef).normalize();
-    const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+    // Update matrixWorld before reading so OrbitControls damping changes are immediately reflected.
+    camera.updateMatrixWorld();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    const back = new THREE.Vector3();
+    camera.matrixWorld.extractBasis(right, up, back);
+    const fwd = back.negate();
     return { fwd, up, right };
 }
 
-function identifyHiddenFaces() {
-    const axes = getCameraAxes();
-    
-    // 1. Bottom face: face whose normal minimizes N . up
-    let bottomFace = 'D';
-    let minUpDot = Infinity;
-    for (const [key, n] of Object.entries(faceNormals)) {
-        const d = n.dot(axes.up);
-        if (d < minUpDot) {
-            minUpDot = d;
-            bottomFace = key;
-        }
-    }
+function identifyHiddenFaces(axes = getCameraAxes()) {
+    // Pick the back-facing face (n . fwd >= 0) from each antipodal pair so every slot shows a genuinely hidden face.
+    const bottomFace = axes.fwd.y <= 0 ? 'D' : 'U';
+    const sideX = axes.fwd.x <= 0 ? 'L' : 'R';
+    const sideZ = axes.fwd.z <= 0 ? 'B' : 'F';
 
-    // 2. Back-Left & Back-Right: among remaining faces that face away from camera (N . fwd > -0.35)
-    let backLeftFace = 'L';
-    let minRightDot = Infinity;
-    let backRightFace = 'B';
-    let maxRightDot = -Infinity;
+    const xRightDot = faceNormals[sideX].dot(axes.right);
+    const zRightDot = faceNormals[sideZ].dot(axes.right);
 
-    for (const [key, n] of Object.entries(faceNormals)) {
-        if (key === bottomFace) continue;
-        const fwdDot = n.dot(axes.fwd);
-        const rightDot = n.dot(axes.right);
-
-        if (fwdDot > -0.35) {
-            if (rightDot < minRightDot) {
-                minRightDot = rightDot;
-                backLeftFace = key;
-            }
-            if (rightDot > maxRightDot) {
-                maxRightDot = rightDot;
-                backRightFace = key;
-            }
-        }
-    }
+    const backLeftFace = xRightDot <= zRightDot ? sideX : sideZ;
+    const backRightFace = xRightDot <= zRightDot ? sideZ : sideX;
 
     return { bottomFace, backLeftFace, backRightFace };
+}
+
+function isCubeStateComplete(state) {
+    if (!state) return false;
+    for (const faceKey of ['U', 'D', 'F', 'B', 'R', 'L']) {
+        const faceData = state[faceKey];
+        if (!faceData || !faceData[0] || !faceData[1]) return false;
+        if (!faceData[0][0] || !faceData[0][1] || !faceData[1][0] || !faceData[1][1]) return false;
+    }
+    return true;
+}
+
+// Sort a face's 4 stickers onto its canonical orthogonal tangent lattice using right-handed mirror chirality (colAxis x rowDown == +n).
+function sortFaceStickersForMirror(mKey, faceKey, rawStickers, axes) {
+    const n = faceNormals[faceKey];
+    let colAxis;
+    let rowDown;
+
+    if (mKey !== 'bottom' && Math.abs(n.y) < 1e-6) {
+        // Keep side panels horizon-locked (U top, D bottom) while preserving +n chirality and screen-right parity.
+        rowDown = new THREE.Vector3(0, -1, 0);
+        colAxis = new THREE.Vector3(-n.z, 0, n.x);
+    } else {
+        let bestScore = -Infinity;
+        for (const cand of CARDINAL_AXES) {
+            if (Math.abs(cand.dot(n)) > 1e-6) continue;
+            const candDown = new THREE.Vector3().crossVectors(n, cand);
+            const score = cand.dot(axes.right) - candDown.dot(axes.up);
+            if (score > bestScore) {
+                bestScore = score;
+                colAxis = cand;
+                rowDown = candDown;
+            }
+        }
+    }
+
+    const center = new THREE.Vector3();
+    const wPos = new THREE.Vector3();
+    const positions = rawStickers.map(st => {
+        st.cubie.getWorldPosition(wPos);
+        center.add(wPos);
+        return wPos.clone();
+    });
+    center.multiplyScalar(1 / rawStickers.length);
+
+    const sortedGrid = [[null, null], [null, null]];
+    const rel = new THREE.Vector3();
+    for (let i = 0; i < rawStickers.length; i++) {
+        rel.copy(positions[i]).sub(center);
+        const row = rel.dot(rowDown) >= 0 ? 1 : 0;
+        const col = rel.dot(colAxis) >= 0 ? 1 : 0;
+        sortedGrid[row][col] = rawStickers[i];
+    }
+    return sortedGrid;
+}
+
+function renderMirrorCanvas(mirror, faceKey, sortedGrid) {
+    const ctx = mirror.ctx;
+    const stickerSize = 236;
+    const margin = 16;
+    const gap = 8;
+    const quadPositions = [
+        [margin, margin],
+        [margin + stickerSize + gap, margin],
+        [margin, margin + stickerSize + gap],
+        [margin + stickerSize + gap, margin + stickerSize + gap]
+    ];
+
+    ctx.clearRect(0, 0, 512, 512);
+
+    ctx.fillStyle = '#0e0e14';
+    ctx.beginPath();
+    roundRect(ctx, 4, 4, 504, 504, 20);
+    ctx.fill();
+
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    for (let qr = 0; qr < 2; qr++) {
+        for (let qc = 0; qc < 2; qc++) {
+            const sticker = sortedGrid[qr][qc];
+            const [sx, sy] = quadPositions[qr * 2 + qc];
+            const color = sticker ? sticker.color : (colors[faceKey] ? '#' + colors[faceKey].toString(16).padStart(6, '0') : '#222222');
+
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            roundRect(ctx, sx, sy, stickerSize, stickerSize, 14);
+            ctx.fill();
+
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 6;
+            ctx.stroke();
+
+            const gloss = ctx.createLinearGradient(sx, sy, sx + stickerSize, sy + stickerSize);
+            gloss.addColorStop(0, 'rgba(255, 255, 255, 0.24)');
+            gloss.addColorStop(0.5, 'rgba(255, 255, 255, 0.0)');
+            gloss.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+            ctx.fillStyle = gloss;
+            ctx.beginPath();
+            roundRect(ctx, sx, sy, stickerSize, stickerSize, 14);
+            ctx.fill();
+
+            if (sticker && sticker.dot && sticker.dot.text) {
+                const cx = sx + stickerSize / 2;
+                const cy = sy + stickerSize / 2;
+                const badgeRadius = 60;
+
+                ctx.fillStyle = sticker.dot.color || '#ffffff';
+                ctx.beginPath();
+                ctx.arc(cx, cy, badgeRadius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 5;
+                ctx.stroke();
+
+                const text = sticker.dot.text;
+                if (text.includes('\n')) {
+                    const lines = text.split('\n');
+                    ctx.fillStyle = '#000000';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.font = 'bold 28px sans-serif';
+                    ctx.fillText(lines[0].replace(/<\/?u>/g, ''), cx, cy - 20);
+                    drawTextWithUnderline(ctx, lines[1], cx, cy + 22, 'bold 32px sans-serif', 32);
+                } else {
+                    const clean = text.replace(/<\/?u>/g, '');
+                    const fontSize = clean.length === 1 ? 64 : (clean.length === 2 ? 52 : 40);
+                    drawTextWithUnderline(ctx, text, cx, cy, 'bold ' + fontSize + 'px sans-serif', fontSize);
+                }
+            }
+        }
+    }
+
+    mirror.texture.needsUpdate = true;
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -1553,21 +1703,9 @@ function initFloatingSides() {
     floatingMirrors = {};
 
     const mirrorDefs = {
-        bottom: {
-            name: 'Bottom',
-            posOffset: new THREE.Vector3(0, -2.85, 0),
-            rot: new THREE.Euler(-0.55, 0, 0)
-        },
-        topLeft: {
-            name: 'Top-Left',
-            posOffset: new THREE.Vector3(-2.8, 2.15, 0),
-            rot: new THREE.Euler(0.18, 0.45, -0.06)
-        },
-        topRight: {
-            name: 'Top-Right',
-            posOffset: new THREE.Vector3(2.8, 2.15, 0),
-            rot: new THREE.Euler(0.18, -0.45, 0.06)
-        }
+        bottom:   { rot: new THREE.Euler(-0.78, 0, 0) },
+        topLeft:  { rot: new THREE.Euler(0.18, 0.42, -0.05) },
+        topRight: { rot: new THREE.Euler(0.18, -0.42, 0.05) }
     };
 
     const geometry = new THREE.PlaneGeometry(MIRROR_SIZE, MIRROR_SIZE);
@@ -1592,7 +1730,7 @@ function initFloatingSides() {
             canvas: canvas,
             ctx: canvas.getContext('2d'),
             texture: texture,
-            posOffset: def.posOffset
+            lastRenderSig: ''
         };
     }
 
@@ -1612,67 +1750,66 @@ function updateFloatingSides() {
     }
 
     if (typeof getCube2DState !== 'function') return;
-    const state = getCube2DState();
 
-    // Dynamically adjust mirror distance & scale based on camera distance to maintain scale
+    let state = null;
+    const isSettled = dragGroup.children.length === 0 && !animationInProgress && !isDragging;
+    if (isSettled) {
+        const freshState = getCube2DState();
+        if (isCubeStateComplete(freshState)) {
+            lastValidCubeState = freshState;
+            state = freshState;
+        }
+    }
+    if (!state) {
+        state = lastValidCubeState;
+        if (!state) {
+            const fallback = getCube2DState();
+            if (!isCubeStateComplete(fallback)) return;
+            lastValidCubeState = fallback;
+            state = fallback;
+        }
+    }
+
+    // Compute camera distance and exact frustum bounds so all 3 panels fit unclipped on any aspect ratio
     const target = (controls && controls.target) ? controls.target : new THREE.Vector3(0, 0, 0);
     const dist = camera.position.distanceTo(target);
     const factor = dist / 8.5;
+    const zAnchor = dist * 1.01;
+    const aspect = camera.aspect || 1;
+    const visHalfH = zAnchor * Math.tan((camera.fov * Math.PI) / 360);
+    const visHalfW = visHalfH * aspect;
+
+    const sideScale = factor * Math.min(1, Math.max(0.32, aspect / 1.15));
+    const sideHalf = (MIRROR_SIZE / 2) * sideScale;
+    const sideX = Math.min(2.70 * factor, Math.max(sideHalf + 0.15 * factor, visHalfW - sideHalf * 1.08 - 0.08 * visHalfW));
+    const sideY = aspect < 1.0 ? Math.min(visHalfH * 0.68, 2.25 * factor) : 2.10 * factor;
+    const botScale = factor * Math.min(0.86, Math.max(0.55, aspect / 0.85));
+
+    const slotTransforms = {
+        bottom:   { x: 0,      y: -2.44 * factor, scale: botScale },
+        topLeft:  { x: -sideX, y: sideY,          scale: sideScale },
+        topRight: { x: sideX,  y: sideY,          scale: sideScale }
+    };
 
     for (const [mKey, mirror] of Object.entries(floatingMirrors)) {
-        mirror.mesh.position.set(
-            mirror.posOffset.x * factor,
-            mirror.posOffset.y * factor,
-            -dist * 1.01
-        );
-        mirror.mesh.scale.set(factor, factor, factor);
+        const t = slotTransforms[mKey];
+        mirror.mesh.position.set(t.x, t.y, -zAnchor);
+        mirror.mesh.scale.set(t.scale, t.scale, t.scale);
     }
 
-    // Determine the 3 hidden faces relative to current camera perspective
-    const { bottomFace, backLeftFace, backRightFace } = identifyHiddenFaces();
-
+    const axes = getCameraAxes();
+    const { bottomFace, backLeftFace, backRightFace } = identifyHiddenFaces(axes);
     const mirrorFaceMap = {
         bottom: bottomFace,
         topLeft: backLeftFace,
         topRight: backRightFace
     };
 
-    const axes = getCameraAxes();
-
-    const stickerSize = 236;
-    const margin = 16;
-    const gap = 8;
-    const quadPositions = [
-        [margin, margin],                                        // (0,0) Top-Left
-        [margin + stickerSize + gap, margin],                    // (0,1) Top-Right
-        [margin, margin + stickerSize + gap],                    // (1,0) Bottom-Left
-        [margin + stickerSize + gap, margin + stickerSize + gap] // (1,1) Bottom-Right
-    ];
-
     for (const [mKey, faceKey] of Object.entries(mirrorFaceMap)) {
         const mirror = floatingMirrors[mKey];
-        if (!mirror) continue;
-        const ctx = mirror.ctx;
-        ctx.clearRect(0, 0, 512, 512);
-
-        // 1. Sleek dark background panel / bevel frame
-        ctx.fillStyle = '#0e0e14';
-        ctx.beginPath();
-        roundRect(ctx, 4, 4, 504, 504, 20);
-        ctx.fill();
-
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 6;
-        ctx.stroke();
-
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-
         const faceData = state[faceKey];
-        if (!faceData) continue;
+        if (!mirror || !faceData) continue;
 
-        // Collect the 4 stickers on this face
         const rawStickers = [];
         for (let r = 0; r < 2; r++) {
             for (let c = 0; c < 2; c++) {
@@ -1683,131 +1820,16 @@ function updateFloatingSides() {
         }
         if (rawStickers.length < 4) continue;
 
-        // Project each sticker's cubie position into camera space
-        const projected = rawStickers.map(st => {
-            const wPos = st.cubie.getWorldPosition(new THREE.Vector3());
-            const rel = wPos.sub(camera.position);
-            return {
-                sticker: st,
-                camX: rel.dot(axes.right),
-                camY: rel.dot(axes.up),
-                camZ: rel.dot(axes.fwd)
-            };
-        });
-
-        // Compute centroids for sorting
-        const midX = projected.reduce((sum, p) => sum + p.camX, 0) / 4;
-        const midY = projected.reduce((sum, p) => sum + p.camY, 0) / 4;
-        const midZ = projected.reduce((sum, p) => sum + p.camZ, 0) / 4;
-
-        // Sort into quadrants [row, col]
-        const sortedGrid = [[null, null], [null, null]];
-
-        projected.forEach(p => {
-            let row = 0;
-            let col = 0;
-
-            if (mKey === 'bottom') {
-                // In bottom mirror:
-                // deeper along fwd (larger camZ) is further from viewer -> row 0 (top of mirror)
-                // closer along fwd (smaller camZ) is closer to viewer -> row 1 (bottom of mirror)
-                row = p.camZ > midZ ? 0 : 1;
-                // left relative to camera -> col 0, right -> col 1
-                col = p.camX > midX ? 1 : 0;
-            } else {
-                // In side mirrors (topLeft, topRight):
-                // higher relative to camera (larger camY) -> row 0 (top of mirror)
-                // lower relative to camera (smaller camY) -> row 1 (bottom of mirror)
-                row = p.camY > midY ? 0 : 1;
-                // left relative to camera -> col 0, right -> col 1
-                col = p.camX > midX ? 1 : 0;
-            }
-
-            // Fallback safety to avoid collision
-            if (sortedGrid[row][col] === null) {
-                sortedGrid[row][col] = p.sticker;
-            } else {
-                // fill alternative slot if duplicate
-                for (let r = 0; r < 2; r++) {
-                    for (let c = 0; c < 2; c++) {
-                        if (sortedGrid[r][c] === null) {
-                            sortedGrid[r][c] = p.sticker;
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-
-        // Store quadrant mapping for raycasting
+        const sortedGrid = sortFaceStickersForMirror(mKey, faceKey, rawStickers, axes);
         mirror.mesh.userData.quadrants = sortedGrid;
 
-        // Draw 4 stickers
-        for (let qr = 0; qr < 2; qr++) {
-            for (let qc = 0; qc < 2; qc++) {
-                const sticker = sortedGrid[qr][qc];
-                const posIdx = qr * 2 + qc;
-                const [sx, sy] = quadPositions[posIdx];
+        const renderSig = faceKey + '|' + sortedGrid.flat().map(st =>
+            st ? `${st.color}:${st.dot ? `${st.dot.text}@${st.dot.color}` : ''}` : ''
+        ).join(',');
+        if (mirror.lastRenderSig === renderSig) continue;
 
-                const color = sticker ? sticker.color : (colors[faceKey] ? '#' + colors[faceKey].toString(16).padStart(6, '0') : '#222222');
-
-                // Sticker rectangle
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                roundRect(ctx, sx, sy, stickerSize, stickerSize, 14);
-                ctx.fill();
-
-                // Sticker border
-                ctx.strokeStyle = '#000000';
-                ctx.lineWidth = 6;
-                ctx.stroke();
-
-                // Subtle gloss overlay
-                const gloss = ctx.createLinearGradient(sx, sy, sx + stickerSize, sy + stickerSize);
-                gloss.addColorStop(0, 'rgba(255, 255, 255, 0.24)');
-                gloss.addColorStop(0.5, 'rgba(255, 255, 255, 0.0)');
-                gloss.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
-                ctx.fillStyle = gloss;
-                ctx.beginPath();
-                roundRect(ctx, sx, sy, stickerSize, stickerSize, 14);
-                ctx.fill();
-
-                // Badge / Dot
-                if (sticker && sticker.dot && sticker.dot.text) {
-                    const cx = sx + stickerSize / 2;
-                    const cy = sy + stickerSize / 2;
-                    const badgeRadius = 60;
-
-                    // Badge circle
-                    ctx.fillStyle = sticker.dot.color || '#ffffff';
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, badgeRadius, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = '#000000';
-                    ctx.lineWidth = 5;
-                    ctx.stroke();
-
-                    const text = sticker.dot.text;
-                    if (text.includes('\n')) {
-                        const lines = text.split('\n');
-                        const l1 = lines[0];
-                        const l2 = lines[1];
-                        ctx.fillStyle = '#000000';
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.font = 'bold 28px sans-serif';
-                        ctx.fillText(l1.replace(/<\/?u>/g, ''), cx, cy - 20);
-                        drawTextWithUnderline(ctx, l2, cx, cy + 22, 'bold 32px sans-serif', 32);
-                    } else {
-                        const clean = text.replace(/<\/?u>/g, '');
-                        const fontSize = clean.length === 1 ? 64 : (clean.length === 2 ? 52 : 40);
-                        drawTextWithUnderline(ctx, text, cx, cy, 'bold ' + fontSize + 'px sans-serif', fontSize);
-                    }
-                }
-            }
-        }
-
-        mirror.texture.needsUpdate = true;
+        mirror.lastRenderSig = renderSig;
+        renderMirrorCanvas(mirror, faceKey, sortedGrid);
     }
 }
 
