@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>3D 2x2x2 Rubik's Cube Simulator</title>
-  <link rel="stylesheet" href="style.css?v=27">
+  <link rel="stylesheet" href="style.css?v=28">
   <link rel="manifest" href="manifest.json">
   <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -65,19 +65,33 @@
     </div>
 
     <div class="bottom-bar">
-      <div class="panel sequence-panel">
-        <div class="sequence-header">Sequence</div>
-        <div class="sequence-row">
-          <input type="text" id="sequence-input" placeholder="e.g. R U R' U' or RUR'U'" title="Enter move sequence">
-          <button id="btn-execute-sequence">Execute</button>
+      <div class="bottom-left-stack">
+        <div class="panel permutation-panel" id="permutation-panel">
+          <div class="permutation-header-row">
+            <span class="permutation-header">Permutation (GAP24)</span>
+            <div class="permutation-meta">
+              <span id="perm-order-badge" class="perm-badge" title="Group element order (LCM of disjoint cycle lengths)">Order: 1</span>
+              <span id="perm-parity-badge" class="perm-badge" title="Permutation parity">Parity: Even</span>
+              <button id="btn-copy-perm" class="btn-copy-perm" title="Copy GAP24 disjoint cycles to clipboard">Copy</button>
+            </div>
+          </div>
+          <div id="permutation-display" class="permutation-display" title="Active GAP24 disjoint cycle decomposition">() &mdash; Identity (Solved)</div>
         </div>
-        <div class="sequence-presets">
-          <button class="btn-preset-seq" data-seq="R U R' U'" title="Right Trigger / Sexy Move (R U R' U')">R U R' U'</button>
-          <button class="btn-preset-seq" data-seq="L' U' L U" title="Left Trigger (L' U' L U)">L' U' L U</button>
-          <button class="btn-preset-seq" data-seq="F R U R' U' F'" title="Cross / FRUR'U'F'">F R U R' U' F'</button>
-          <button class="btn-preset-seq" data-seq="R U R' U R U2 R'" title="Sune (R U R' U R U2 R')">Sune</button>
+
+        <div class="panel sequence-panel">
+          <div class="sequence-header">Sequence</div>
+          <div class="sequence-row">
+            <input type="text" id="sequence-input" placeholder="e.g. R U R' U' or RUR'U'" title="Enter move sequence">
+            <button id="btn-execute-sequence">Execute</button>
+          </div>
+          <div class="sequence-presets">
+            <button class="btn-preset-seq" data-seq="R U R' U'" title="Right Trigger / Sexy Move (R U R' U')">R U R' U'</button>
+            <button class="btn-preset-seq" data-seq="L' U' L U" title="Left Trigger (L' U' L U)">L' U' L U</button>
+            <button class="btn-preset-seq" data-seq="F R U R' U' F'" title="Cross / FRUR'U'F'">F R U R' U' F'</button>
+            <button class="btn-preset-seq" data-seq="R U R' U R U2 R'" title="Sune (R U R' U R U2 R')">Sune</button>
+          </div>
+          <div id="sequence-error" class="sequence-error" style="display: none;">Invalid moves (allowed: U, D, F, B, R, L, inverses e.g. U', and 180° turns e.g. U2)</div>
         </div>
-        <div id="sequence-error" class="sequence-error" style="display: none;">Invalid moves (allowed: U, D, F, B, R, L, inverses e.g. U', and 180° turns e.g. U2)</div>
       </div>
       
       <div class="panel controls-group" id="solve-controls">
@@ -131,11 +145,11 @@
     <div class="net-container" id="net-container"></div>
   </div>
 
-  <script src="cube.js?v=27"></script>
+  <script src="cube.js?v=28"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=27').then(reg => {
+        navigator.serviceWorker.register('sw.js?v=28').then(reg => {
           reg.update();
         }).catch(err => {
           console.log('ServiceWorker registration failed: ', err);

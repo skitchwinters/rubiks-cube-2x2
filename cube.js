@@ -110,6 +110,8 @@ const CARDINAL_AXES = [
     new THREE.Vector3( 0,  0, -1)
 ];
 
+const GAP24_FACE_OFFSETS = { U: 1, L: 5, F: 9, R: 13, B: 17, D: 21 };
+
 // --- Interaction State (Declared early to avoid TDZ errors during initial createCube) ---
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -1181,6 +1183,136 @@ document.querySelectorAll('.btn-preset-seq').forEach(btn => {
 
 // --- 2D Unfolded Net System ---
 
+// Map a cubie position and outward normal vector to its { faceKey, row, col } cell in the 2D net.
+function resolveStickerFaceCell(posVec, normVec) {
+    const gx = Math.round(posVec.x / offset);
+    const gy = Math.round(posVec.y / offset);
+    const gz = Math.round(posVec.z / offset);
+    const nx = Math.round(normVec.x);
+    const ny = Math.round(normVec.y);
+    const nz = Math.round(normVec.z);
+
+    if (ny === 1 && gy === 1) return { faceKey: 'U', row: gz > 0 ? 1 : 0, col: gx > 0 ? 1 : 0 };
+    if (ny === -1 && gy === -1) return { faceKey: 'D', row: gz > 0 ? 0 : 1, col: gx > 0 ? 1 : 0 };
+    if (nz === 1 && gz === 1) return { faceKey: 'F', row: gy > 0 ? 0 : 1, col: gx > 0 ? 1 : 0 };
+    if (nz === -1 && gz === -1) return { faceKey: 'B', row: gy > 0 ? 0 : 1, col: gx > 0 ? 0 : 1 };
+    if (nx === 1 && gx === 1) return { faceKey: 'R', row: gy > 0 ? 0 : 1, col: gz > 0 ? 0 : 1 };
+    if (nx === -1 && gx === -1) return { faceKey: 'L', row: gy > 0 ? 0 : 1, col: gz > 0 ? 1 : 0 };
+    return null;
+}
+
+function getStickerGapIndex(posVec, normVec) {
+    const cell = resolveStickerFaceCell(posVec, normVec);
+    if (!cell) return null;
+    return GAP24_FACE_OFFSETS[cell.faceKey] + cell.row * 2 + cell.col;
+}
+
+function gcd(a, b) {
+    let x = Math.abs(a);
+    let y = Math.abs(b);
+    while (y !== 0) {
+        const t = x % y;
+        x = y;
+        y = t;
+    }
+    return x || 1;
+}
+
+function lcm(a, b) {
+    return (a / gcd(a, b)) * b;
+}
+
+// Compute active GAP24 permutation sigma[home] = current along with disjoint cycles, order, and parity.
+function computeGap24Permutation() {
+    const sigma = new Array(25).fill(0);
+    for (let k = 1; k <= 24; k++) sigma[k] = k;
+
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    const worldNorm = new THREE.Vector3();
+
+    cubies.forEach(cubie => {
+        if (!cubie.userData || !cubie.userData.initialPosition) return;
+        cubie.getWorldPosition(worldPos);
+        cubie.getWorldQuaternion(worldQuat);
+
+        for (let i = 0; i < 6; i++) {
+            const mat = cubie.material[i];
+            if (!mat || mat === coreMaterial) continue;
+
+            const homeIdx = getStickerGapIndex(cubie.userData.initialPosition, CARDINAL_AXES[i]);
+            worldNorm.copy(CARDINAL_AXES[i]).applyQuaternion(worldQuat).round();
+            const currIdx = getStickerGapIndex(worldPos, worldNorm);
+
+            if (homeIdx !== null && currIdx !== null) {
+                sigma[homeIdx] = currIdx;
+            }
+        }
+    });
+
+    const visited = new Array(25).fill(false);
+    const cycles = [];
+    for (let k = 1; k <= 24; k++) {
+        if (visited[k]) continue;
+        visited[k] = true;
+        if (sigma[k] === k) continue;
+
+        const cycle = [k];
+        let curr = sigma[k];
+        while (curr !== k && !visited[curr]) {
+            visited[curr] = true;
+            cycle.push(curr);
+            curr = sigma[curr];
+        }
+        if (cycle.length >= 2) cycles.push(cycle);
+    }
+
+    const order = cycles.reduce((acc, c) => lcm(acc, c.length), 1);
+    const transpositions = cycles.reduce((acc, c) => acc + (c.length - 1), 0);
+    const parity = (transpositions % 2 === 0) ? 'Even' : 'Odd';
+    const plainText = cycles.length === 0 ? '()' : cycles.map(c => '(' + c.join(', ') + ')').join('');
+    const htmlText = cycles.length === 0
+        ? '() &mdash; Identity (Solved)'
+        : cycles.map(c => '(' + c.map(n => (n === 6 || n === 16) ? '<u>' + n + '</u>' : String(n)).join(', ') + ')').join('');
+
+    return { sigma, cycles, order, parity, plainText, htmlText };
+}
+
+function updatePermutationPane() {
+    const displayEl = document.getElementById('permutation-display');
+    const orderEl = document.getElementById('perm-order-badge');
+    const parityEl = document.getElementById('perm-parity-badge');
+    if (!displayEl && !orderEl && !parityEl) return;
+
+    const perm = computeGap24Permutation();
+    if (displayEl) {
+        displayEl.innerHTML = perm.htmlText;
+        displayEl.dataset.plain = perm.plainText;
+    }
+    if (orderEl) orderEl.innerText = 'Order: ' + perm.order;
+    if (parityEl) parityEl.innerText = 'Parity: ' + perm.parity;
+}
+
+const btnCopyPerm = document.getElementById('btn-copy-perm');
+let copyPermTimer = null;
+if (btnCopyPerm) {
+    btnCopyPerm.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const displayEl = document.getElementById('permutation-display');
+        const text = (displayEl && displayEl.dataset.plain) ? displayEl.dataset.plain : '()';
+        const showCopied = () => {
+            btnCopyPerm.innerText = 'Copied!';
+            if (copyPermTimer) clearTimeout(copyPermTimer);
+            copyPermTimer = setTimeout(() => {
+                btnCopyPerm.innerText = 'Copy';
+            }, 1200);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(showCopied).catch(() => {});
+        }
+    });
+}
+
 function getCube2DState() {
     const state = {
         U: Array(2).fill(null).map(() => Array(2).fill(null)),
@@ -1191,15 +1323,6 @@ function getCube2DState() {
         D: Array(2).fill(null).map(() => Array(2).fill(null))
     };
 
-    const localNormals = [
-        new THREE.Vector3( 1,  0,  0), // 0: +x (R)
-        new THREE.Vector3(-1,  0,  0), // 1: -x (L)
-        new THREE.Vector3( 0,  1,  0), // 2: +y (U)
-        new THREE.Vector3( 0, -1,  0), // 3: -y (D)
-        new THREE.Vector3( 0,  0,  1), // 4: +z (F)
-        new THREE.Vector3( 0,  0, -1)  // 5: -z (B)
-    ];
-
     const worldPos = new THREE.Vector3();
     const worldQuat = new THREE.Quaternion();
     const worldNorm = new THREE.Vector3();
@@ -1207,52 +1330,18 @@ function getCube2DState() {
     cubies.forEach(cubie => {
         cubie.getWorldPosition(worldPos);
         cubie.getWorldQuaternion(worldQuat);
-        const gx = Math.round(worldPos.x / offset);
-        const gy = Math.round(worldPos.y / offset);
-        const gz = Math.round(worldPos.z / offset);
 
         for (let i = 0; i < 6; i++) {
             const mat = cubie.material[i];
             if (!mat || mat === coreMaterial) continue;
 
-            worldNorm.copy(localNormals[i]).applyQuaternion(worldQuat).round();
-            let faceKey = null;
-            let row = null;
-            let col = null;
+            worldNorm.copy(CARDINAL_AXES[i]).applyQuaternion(worldQuat).round();
+            const cell = resolveStickerFaceCell(worldPos, worldNorm);
 
-            if (worldNorm.y === 1 && gy === 1) {
-                faceKey = 'U';
-                row = gz + 1;
-                col = gx + 1;
-            } else if (worldNorm.y === -1 && gy === -1) {
-                faceKey = 'D';
-                row = 1 - gz;
-                col = gx + 1;
-            } else if (worldNorm.z === 1 && gz === 1) {
-                faceKey = 'F';
-                row = 1 - gy;
-                col = gx + 1;
-            } else if (worldNorm.z === -1 && gz === -1) {
-                faceKey = 'B';
-                row = 1 - gy;
-                col = 1 - gx;
-            } else if (worldNorm.x === 1 && gx === 1) {
-                faceKey = 'R';
-                row = 1 - gy;
-                col = 1 - gz;
-            } else if (worldNorm.x === -1 && gx === -1) {
-                faceKey = 'L';
-                row = 1 - gy;
-                col = gz + 1;
-            }
-            if (row === 2) row = 1;
-            if (col === 2) col = 1;
-
-
-            if (faceKey && row >= 0 && row < 2 && col >= 0 && col < 2) {
+            if (cell) {
                 let dotData = null;
                 for (const d of dots) {
-                    if (d.cubie === cubie && d.mesh.userData.localNormal.equals(localNormals[i])) {
+                    if (d.cubie === cubie && d.mesh.userData.localNormal.equals(CARDINAL_AXES[i])) {
                         dotData = {
                             text: d.mesh.userData.text,
                             color: d.mesh.userData.color
@@ -1262,11 +1351,11 @@ function getCube2DState() {
                 }
 
                 const hexColor = '#' + mat.color.getHexString();
-                state[faceKey][row][col] = {
+                state[cell.faceKey][cell.row][cell.col] = {
                     color: hexColor,
                     dot: dotData,
                     cubie: cubie,
-                    localNormal: localNormals[i].clone()
+                    localNormal: CARDINAL_AXES[i].clone()
                 };
             }
         }
@@ -1276,6 +1365,7 @@ function getCube2DState() {
 }
 
 function render2DNet() {
+    updatePermutationPane();
     const container = document.getElementById('net-container');
     if (!container) return;
 
