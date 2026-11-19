@@ -1271,9 +1271,7 @@ function computeGap24Permutation() {
     const transpositions = cycles.reduce((acc, c) => acc + (c.length - 1), 0);
     const parity = (transpositions % 2 === 0) ? 'Even' : 'Odd';
     const plainText = cycles.length === 0 ? '()' : cycles.map(c => '(' + c.join(', ') + ')').join('');
-    const htmlText = cycles.length === 0
-        ? '() &mdash; Identity (Solved)'
-        : cycles.map(c => '(' + c.map(n => (n === 6 || n === 16) ? '<u>' + n + '</u>' : String(n)).join(', ') + ')').join('');
+    const htmlText = cycles.length === 0 ? '() &mdash; Identity (Solved)' : plainText;
 
     return { sigma, cycles, order, parity, plainText, htmlText };
 }
